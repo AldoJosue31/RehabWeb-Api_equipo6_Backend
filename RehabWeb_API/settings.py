@@ -136,6 +136,7 @@ CORS_ALLOW_HEADERS = [
     'authorization',
     'content-type',
     'origin',
+    'x-rehab-role',
     'user-agent',
     'x-csrftoken',
     'x-requested-with',

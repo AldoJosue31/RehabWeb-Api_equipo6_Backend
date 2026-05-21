@@ -7,21 +7,40 @@ from django.shortcuts import get_object_or_404
 
 from .models import Conversation, Message, VideoCall
 from .serializers import ConversationSerializer, MessageSerializer, VideoCallSerializer
+from RehabWeb_API.permissions import HasSelectedRole
+from RehabWeb_API.roles import (
+    ROLE_PACIENTE,
+    ROLE_TERAPEUTA,
+    get_request_role,
+    user_matches_conversation_role,
+)
 
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasSelectedRole]
 
     def get_queryset(self):
         user = self.request.user
+        selected_role = get_request_role(self.request)
+        if selected_role == ROLE_PACIENTE:
+            return Conversation.objects.filter(paciente=user)
+        if selected_role == ROLE_TERAPEUTA:
+            return Conversation.objects.filter(terapeuta=user)
+
         return Conversation.objects.filter(Q(paciente=user) | Q(terapeuta=user))
 
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasSelectedRole]
 
     def get_queryset(self):
         user = self.request.user
+        selected_role = get_request_role(self.request)
+        if selected_role == ROLE_PACIENTE:
+            return Message.objects.filter(conversation__paciente=user)
+        if selected_role == ROLE_TERAPEUTA:
+            return Message.objects.filter(conversation__terapeuta=user)
+
         # Filtrar mensajes de las conversaciones del usuario
         return Message.objects.filter(
             Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
@@ -54,11 +73,17 @@ class MessageViewSet(viewsets.ModelViewSet):
     
 class VideoCallViewSet(viewsets.ModelViewSet):
     serializer_class = VideoCallSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasSelectedRole]
 
     def get_queryset(self):
         # Solo puedes ver las llamadas de las que eres parte
         user = self.request.user
+        selected_role = get_request_role(self.request)
+        if selected_role == ROLE_PACIENTE:
+            return VideoCall.objects.filter(conversation__paciente=user)
+        if selected_role == ROLE_TERAPEUTA:
+            return VideoCall.objects.filter(conversation__terapeuta=user)
+
         return VideoCall.objects.filter(
             Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
         )
@@ -75,6 +100,10 @@ class VideoCallViewSet(viewsets.ModelViewSet):
         conversation = get_object_or_404(Conversation, id=conversation_id)
         if user != conversation.paciente and user != conversation.terapeuta:
             return Response({"error": "No tienes permiso para iniciar una llamada aquí."}, status=status.HTTP_403_FORBIDDEN)
+
+        selected_role = get_request_role(request)
+        if selected_role and not user_matches_conversation_role(user, conversation, selected_role):
+            return Response({"error": "El rol seleccionado no participa en esta conversacion."}, status=status.HTTP_403_FORBIDDEN)
 
         # Buscar si ya hay una llamada activa para reciclar la sala
         llamada_activa = VideoCall.objects.filter(

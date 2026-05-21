@@ -1,5 +1,12 @@
 from rest_framework import serializers
 from .models import Conversation, Message, VideoCall
+from RehabWeb_API.roles import (
+    ROLE_PACIENTE,
+    ROLE_TERAPEUTA,
+    get_request_role,
+    user_has_role,
+    user_matches_conversation_role,
+)
 
 class MessageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -20,6 +27,17 @@ class MessageSerializer(serializers.ModelSerializer):
     def validate(self, data):
         if not data.get('encrypted_text') and not data.get('file_attachment'):
             raise serializers.ValidationError("El mensaje debe contener texto cifrado o un archivo adjunto.")
+
+        request = self.context.get('request')
+        conversation = data.get('conversation') or getattr(self.instance, 'conversation', None)
+        if request and conversation:
+            if request.user.id not in (conversation.paciente_id, conversation.terapeuta_id):
+                raise serializers.ValidationError("No puedes enviar mensajes en una conversacion ajena.")
+
+            selected_role = get_request_role(request)
+            if selected_role and not user_matches_conversation_role(request.user, conversation, selected_role):
+                raise serializers.ValidationError("El rol seleccionado no participa en esta conversacion.")
+
         return data
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -34,6 +52,31 @@ class ConversationSerializer(serializers.ModelSerializer):
         if ultimo:
             return MessageSerializer(ultimo).data
         return None
+
+    def validate(self, data):
+        paciente = data.get('paciente') or getattr(self.instance, 'paciente', None)
+        terapeuta = data.get('terapeuta') or getattr(self.instance, 'terapeuta', None)
+
+        if paciente and terapeuta and paciente == terapeuta:
+            raise serializers.ValidationError("Paciente y terapeuta deben ser usuarios distintos.")
+
+        if paciente and not user_has_role(paciente, ROLE_PACIENTE):
+            raise serializers.ValidationError({"paciente": "El usuario no tiene rol de paciente."})
+
+        if terapeuta and not user_has_role(terapeuta, ROLE_TERAPEUTA):
+            raise serializers.ValidationError({"terapeuta": "El usuario no tiene rol de terapeuta."})
+
+        request = self.context.get('request')
+        if request and paciente and terapeuta and not request.user.is_staff:
+            selected_role = get_request_role(request)
+            if selected_role == ROLE_PACIENTE and paciente.id != request.user.id:
+                raise serializers.ValidationError("Como paciente solo puedes crear conversaciones propias.")
+            if selected_role == ROLE_TERAPEUTA and terapeuta.id != request.user.id:
+                raise serializers.ValidationError("Como terapeuta solo puedes crear conversaciones propias.")
+            if not selected_role and request.user.id not in (paciente.id, terapeuta.id):
+                raise serializers.ValidationError("Solo puedes crear conversaciones donde participas.")
+
+        return data
 
 class VideoCallSerializer(serializers.ModelSerializer):
     duration_minutes = serializers.ReadOnlyField()
