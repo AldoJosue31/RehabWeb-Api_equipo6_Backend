@@ -23,11 +23,11 @@ class ConversationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         selected_role = get_request_role(self.request)
         if selected_role == ROLE_PACIENTE:
-            return Conversation.objects.filter(paciente=user)
+            return Conversation.objects.select_related('paciente', 'terapeuta').filter(paciente=user)
         if selected_role == ROLE_TERAPEUTA:
-            return Conversation.objects.filter(terapeuta=user)
+            return Conversation.objects.select_related('paciente', 'terapeuta').filter(terapeuta=user)
 
-        return Conversation.objects.filter(Q(paciente=user) | Q(terapeuta=user))
+        return Conversation.objects.select_related('paciente', 'terapeuta').filter(Q(paciente=user) | Q(terapeuta=user))
 
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
@@ -36,15 +36,20 @@ class MessageViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         selected_role = get_request_role(self.request)
+        conversation_id = self.request.query_params.get('conversation')
         if selected_role == ROLE_PACIENTE:
-            return Message.objects.filter(conversation__paciente=user)
-        if selected_role == ROLE_TERAPEUTA:
-            return Message.objects.filter(conversation__terapeuta=user)
+            queryset = Message.objects.filter(conversation__paciente=user)
+        elif selected_role == ROLE_TERAPEUTA:
+            queryset = Message.objects.filter(conversation__terapeuta=user)
+        else:
+            queryset = Message.objects.filter(
+                Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
+            )
 
-        # Filtrar mensajes de las conversaciones del usuario
-        return Message.objects.filter(
-            Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
-        )
+        if conversation_id:
+            queryset = queryset.filter(conversation_id=conversation_id)
+
+        return queryset.select_related('conversation', 'sender')
 
     def perform_create(self, serializer):
         # Asigna automáticamente el usuario autenticado como el remitente
@@ -70,6 +75,17 @@ class MessageViewSet(viewsets.ModelViewSet):
             {'error': 'Estado no válido'}, 
             status=status.HTTP_400_BAD_REQUEST
         )
+    @action(detail=False, methods=['patch'])
+    def marcar_vistos(self, request):
+        conversation_id = request.data.get('conversation_id')
+        if not conversation_id:
+            return Response({'error': 'Debe proporcionar conversation_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = self.get_queryset().filter(
+            conversation_id=conversation_id,
+        ).exclude(sender=request.user).exclude(status='visto').update(status='visto')
+
+        return Response({'actualizados': updated})
     
 class VideoCallViewSet(viewsets.ModelViewSet):
     serializer_class = VideoCallSerializer
