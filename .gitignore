@@ -12,6 +12,7 @@ build/
 db.sqlite3
 .env
 *.log
+media/
 .idea/
 .vscode/
 *.sublime-workspace

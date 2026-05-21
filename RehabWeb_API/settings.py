@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'django_filters',
     # Local apps
     'RehabWeb_API',
+    'mensajeria',
 ]
 
 MIDDLEWARE = [
@@ -145,8 +146,9 @@ CORS_ALLOW_HEADERS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.TokenAuthentication',
+        
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -190,3 +192,17 @@ LOGGING = {
         },
     },
 }
+
+#mensajeria app - Configuración de archivos multimedia
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False 
+
+CSRF_COOKIE_HTTPONLY = False
+
+CSRF_TRUSTED_ORIGINS = ["http://localhost:4200"]
