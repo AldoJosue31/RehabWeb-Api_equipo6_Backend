@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Conversation, Message, VideoCall
+from RehabWeb_API.models import PacienteProfile, TerapeutaProfile
 from RehabWeb_API.roles import (
     ROLE_PACIENTE,
     ROLE_TERAPEUTA,
@@ -42,16 +43,71 @@ class MessageSerializer(serializers.ModelSerializer):
 
 class ConversationSerializer(serializers.ModelSerializer):
     ultimo_mensaje = serializers.SerializerMethodField()
+    paciente_info = serializers.SerializerMethodField()
+    terapeuta_info = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
-        fields = ['id', 'paciente', 'terapeuta', 'created_at', 'updated_at', 'ultimo_mensaje']
+        fields = [
+            'id',
+            'paciente',
+            'terapeuta',
+            'paciente_info',
+            'terapeuta_info',
+            'created_at',
+            'updated_at',
+            'ultimo_mensaje',
+        ]
 
     def get_ultimo_mensaje(self, obj):
         ultimo = obj.mensajes.last()
         if ultimo:
             return MessageSerializer(ultimo).data
         return None
+
+    def get_paciente_info(self, obj):
+        return self._serialize_user(obj.paciente, ROLE_PACIENTE)
+
+    def get_terapeuta_info(self, obj):
+        return self._serialize_user(obj.terapeuta, ROLE_TERAPEUTA)
+
+    def _serialize_user(self, user, role):
+        full_name = user.get_full_name().strip()
+        data = {
+            'id': user.id,
+            'username': user.username,
+            'nombre_completo': full_name or user.username,
+            'email': user.email,
+            'role': role,
+        }
+
+        if role == ROLE_TERAPEUTA:
+            try:
+                profile = user.perfil_terapeuta
+                data.update({
+                    'especialidad': profile.especialidad,
+                    'numero_licencia': profile.numero_licencia,
+                })
+            except TerapeutaProfile.DoesNotExist:
+                data.update({'especialidad': '', 'numero_licencia': ''})
+        else:
+            try:
+                profile = user.perfil_paciente
+                data.update({
+                    'estado': profile.estado,
+                    'fecha_nacimiento': profile.fecha_nacimiento,
+                    'estrategia_validacion': profile.estrategia_validacion,
+                    'estrategia_progreso': profile.estrategia_progreso,
+                })
+            except PacienteProfile.DoesNotExist:
+                data.update({
+                    'estado': '',
+                    'fecha_nacimiento': None,
+                    'estrategia_validacion': '',
+                    'estrategia_progreso': '',
+                })
+
+        return data
 
     def validate(self, data):
         paciente = data.get('paciente') or getattr(self.instance, 'paciente', None)
