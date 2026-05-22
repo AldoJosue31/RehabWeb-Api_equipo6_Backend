@@ -4,18 +4,22 @@ Django settings for RehabWeb_API project.
 Generated for the RehabWeb physiotherapy webapp.
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-change-this-in-production-rehabweb-api-secret-key'
+SECRET_KEY = os.getenv(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-change-this-in-production-rehabweb-api-secret-key',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,backend').split(',')
 
 
 # Application definition
@@ -73,11 +77,11 @@ WSGI_APPLICATION = 'RehabWeb_API.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'rehab_db',
-        'USER': 'root',
-        'PASSWORD': '',
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
+        'NAME': os.getenv('MYSQL_DATABASE', 'rehab_db'),
+        'USER': os.getenv('MYSQL_USER', 'root'),
+        'PASSWORD': os.getenv('MYSQL_PASSWORD', ''),
+        'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
+        'PORT': os.getenv('MYSQL_PORT', '3306'),
     }
 }
 
@@ -126,6 +130,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:4200',
     'http://127.0.0.1:4200',
+    'http://localhost:4201',
+    'http://127.0.0.1:4201',
+    'http://frontend:4200',
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -206,7 +213,10 @@ CSRF_COOKIE_SECURE = False
 
 CSRF_COOKIE_HTTPONLY = False
 
-CSRF_TRUSTED_ORIGINS = ["http://localhost:4200"]
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    'CSRF_TRUSTED_ORIGINS',
+    'http://localhost:4200,http://127.0.0.1:4200,http://localhost:4201,http://127.0.0.1:4201',
+).split(',')
 
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 DEFAULT_FROM_EMAIL = 'rehabweb@localhost'
