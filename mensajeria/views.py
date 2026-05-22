@@ -3,29 +3,74 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.shortcuts import get_object_or_404
 
 from .models import Conversation, Message, VideoCall
 from .serializers import ConversationSerializer, MessageSerializer, VideoCallSerializer
+from RehabWeb_API.permissions import HasSelectedRole
+from RehabWeb_API.roles import (
+    ROLE_PACIENTE,
+    ROLE_TERAPEUTA,
+    get_request_role,
+    user_matches_conversation_role,
+)
 
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasSelectedRole]
 
     def get_queryset(self):
         user = self.request.user
-        return Conversation.objects.filter(Q(paciente=user) | Q(terapeuta=user))
+        selected_role = get_request_role(self.request)
+        if selected_role == ROLE_PACIENTE:
+            return Conversation.objects.select_related('paciente', 'terapeuta').filter(paciente=user)
+        if selected_role == ROLE_TERAPEUTA:
+            return Conversation.objects.select_related('paciente', 'terapeuta').filter(terapeuta=user)
+
+        return Conversation.objects.select_related('paciente', 'terapeuta').filter(Q(paciente=user) | Q(terapeuta=user))
 
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasSelectedRole]
 
     def get_queryset(self):
         user = self.request.user
-        # Filtrar mensajes de las conversaciones del usuario
-        return Message.objects.filter(
-            Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
-        )
+        selected_role = get_request_role(self.request)
+        conversation_id = self.request.query_params.get('conversation')
+        if selected_role == ROLE_PACIENTE:
+            queryset = Message.objects.filter(conversation__paciente=user)
+        elif selected_role == ROLE_TERAPEUTA:
+            queryset = Message.objects.filter(conversation__terapeuta=user)
+        else:
+            queryset = Message.objects.filter(
+                Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
+            )
+
+        if conversation_id:
+            queryset = queryset.filter(conversation_id=conversation_id)
+
+        return queryset.select_related('conversation', 'sender')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        conversation_id = request.query_params.get('conversation')
+
+        if conversation_id:
+            before = request.query_params.get('before')
+            if before:
+                before_date = parse_datetime(before)
+                if before_date:
+                    queryset = queryset.filter(timestamp__lt=before_date)
+
+            limit = min(int(request.query_params.get('limit', 20)), 20)
+            page = list(queryset.order_by('-timestamp')[:limit + 1])
+            has_more = len(page) > limit
+            page = sorted(page[:limit], key=lambda message: message.timestamp)
+            serializer = self.get_serializer(page, many=True)
+            return Response(serializer.data, headers={'X-Has-More': 'true' if has_more else 'false'})
+
+        return super().list(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         # Asigna automáticamente el usuario autenticado como el remitente
@@ -51,14 +96,31 @@ class MessageViewSet(viewsets.ModelViewSet):
             {'error': 'Estado no válido'}, 
             status=status.HTTP_400_BAD_REQUEST
         )
+    @action(detail=False, methods=['patch'])
+    def marcar_vistos(self, request):
+        conversation_id = request.data.get('conversation_id')
+        if not conversation_id:
+            return Response({'error': 'Debe proporcionar conversation_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = self.get_queryset().filter(
+            conversation_id=conversation_id,
+        ).exclude(sender=request.user).exclude(status='visto').update(status='visto')
+
+        return Response({'actualizados': updated})
     
 class VideoCallViewSet(viewsets.ModelViewSet):
     serializer_class = VideoCallSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasSelectedRole]
 
     def get_queryset(self):
         # Solo puedes ver las llamadas de las que eres parte
         user = self.request.user
+        selected_role = get_request_role(self.request)
+        if selected_role == ROLE_PACIENTE:
+            return VideoCall.objects.filter(conversation__paciente=user)
+        if selected_role == ROLE_TERAPEUTA:
+            return VideoCall.objects.filter(conversation__terapeuta=user)
+
         return VideoCall.objects.filter(
             Q(conversation__paciente=user) | Q(conversation__terapeuta=user)
         )
@@ -75,6 +137,13 @@ class VideoCallViewSet(viewsets.ModelViewSet):
         conversation = get_object_or_404(Conversation, id=conversation_id)
         if user != conversation.paciente and user != conversation.terapeuta:
             return Response({"error": "No tienes permiso para iniciar una llamada aquí."}, status=status.HTTP_403_FORBIDDEN)
+
+        selected_role = get_request_role(request)
+        if selected_role != ROLE_TERAPEUTA:
+            return Response({"error": "Solo el terapeuta puede iniciar la videoconsulta."}, status=status.HTTP_403_FORBIDDEN)
+
+        if selected_role and not user_matches_conversation_role(user, conversation, selected_role):
+            return Response({"error": "El rol seleccionado no participa en esta conversacion."}, status=status.HTTP_403_FORBIDDEN)
 
         # Buscar si ya hay una llamada activa para reciclar la sala
         llamada_activa = VideoCall.objects.filter(
@@ -97,7 +166,7 @@ class VideoCallViewSet(viewsets.ModelViewSet):
         Message.objects.create(
             conversation=conversation,
             sender=user,
-            encrypted_text=f"📞 Videollamada iniciada. Sala: {nueva_llamada.room_id}",
+            encrypted_text=f"Videollamada iniciada. Sala: {nueva_llamada.room_id}",
             status='entregado'
         )
         

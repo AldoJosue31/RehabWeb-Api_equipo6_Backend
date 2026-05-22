@@ -136,6 +136,7 @@ CORS_ALLOW_HEADERS = [
     'authorization',
     'content-type',
     'origin',
+    'x-rehab-role',
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
@@ -206,3 +207,6 @@ CSRF_COOKIE_SECURE = False
 CSRF_COOKIE_HTTPONLY = False
 
 CSRF_TRUSTED_ORIGINS = ["http://localhost:4200"]
+
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = 'rehabweb@localhost'
