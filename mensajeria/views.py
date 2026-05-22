@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.shortcuts import get_object_or_404
 
 from .models import Conversation, Message, VideoCall
@@ -50,6 +51,26 @@ class MessageViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(conversation_id=conversation_id)
 
         return queryset.select_related('conversation', 'sender')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        conversation_id = request.query_params.get('conversation')
+
+        if conversation_id:
+            before = request.query_params.get('before')
+            if before:
+                before_date = parse_datetime(before)
+                if before_date:
+                    queryset = queryset.filter(timestamp__lt=before_date)
+
+            limit = min(int(request.query_params.get('limit', 20)), 20)
+            page = list(queryset.order_by('-timestamp')[:limit + 1])
+            has_more = len(page) > limit
+            page = sorted(page[:limit], key=lambda message: message.timestamp)
+            serializer = self.get_serializer(page, many=True)
+            return Response(serializer.data, headers={'X-Has-More': 'true' if has_more else 'false'})
+
+        return super().list(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         # Asigna automáticamente el usuario autenticado como el remitente
@@ -118,6 +139,9 @@ class VideoCallViewSet(viewsets.ModelViewSet):
             return Response({"error": "No tienes permiso para iniciar una llamada aquí."}, status=status.HTTP_403_FORBIDDEN)
 
         selected_role = get_request_role(request)
+        if selected_role != ROLE_TERAPEUTA:
+            return Response({"error": "Solo el terapeuta puede iniciar la videoconsulta."}, status=status.HTTP_403_FORBIDDEN)
+
         if selected_role and not user_matches_conversation_role(user, conversation, selected_role):
             return Response({"error": "El rol seleccionado no participa en esta conversacion."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -142,7 +166,7 @@ class VideoCallViewSet(viewsets.ModelViewSet):
         Message.objects.create(
             conversation=conversation,
             sender=user,
-            encrypted_text=f"📞 Videollamada iniciada. Sala: {nueva_llamada.room_id}",
+            encrypted_text=f"Videollamada iniciada. Sala: {nueva_llamada.room_id}",
             status='entregado'
         )
         

@@ -23,11 +23,18 @@ class MessageSerializer(serializers.ModelSerializer):
             limit_mb = 5
             if value.size > limit_mb * 1024 * 1024:
                 raise serializers.ValidationError(f"El archivo es demasiado grande. El máximo permitido es {limit_mb}MB.")
+            content_type = getattr(value, 'content_type', '')
+            if content_type and not content_type.startswith('image/'):
+                raise serializers.ValidationError("Solo se permiten imagenes como evidencia multimedia.")
         return value
 
     def validate(self, data):
         if not data.get('encrypted_text') and not data.get('file_attachment'):
             raise serializers.ValidationError("El mensaje debe contener texto cifrado o un archivo adjunto.")
+
+        text = data.get('encrypted_text')
+        if text and len(text) > 1000:
+            raise serializers.ValidationError({"encrypted_text": "El mensaje no puede superar 1000 caracteres."})
 
         request = self.context.get('request')
         conversation = data.get('conversation') or getattr(self.instance, 'conversation', None)
@@ -136,11 +143,15 @@ class ConversationSerializer(serializers.ModelSerializer):
 
 class VideoCallSerializer(serializers.ModelSerializer):
     duration_minutes = serializers.ReadOnlyField()
+    join_url = serializers.SerializerMethodField()
 
     class Meta:
         model = VideoCall
         fields = [
             'id', 'room_id', 'conversation', 'initiator', 
-            'created_at', 'started_at', 'ended_at', 'status', 'duration_minutes'
+            'created_at', 'started_at', 'ended_at', 'status', 'duration_minutes', 'join_url'
         ]
         read_only_fields = ['id', 'room_id', 'initiator', 'created_at']
+
+    def get_join_url(self, obj):
+        return f'https://meet.jit.si/RehabWeb-{obj.room_id}'
